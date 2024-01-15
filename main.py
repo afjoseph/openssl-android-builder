@@ -33,7 +33,7 @@ def main(options, args):
         )
     if len(p.dirs()) != 1:
         raise Exception("Failed to find a suitable toolchain")
-    toolchain_path = p.dirs()[0]
+    toolchain_bin_path = Path("{}/bin".format(p.dirs()[0]))
 
     logger.info(
         "Build params: openssl_version={}, android_api={}, android_archs={}".format(
@@ -68,8 +68,15 @@ def main(options, args):
         raise Exception("Failed to untar OpenSSL to correct path")
     atexit.register(lambda: shutil.rmtree(src_path, ignore_errors=True))
 
-    # Build for each arch
+    # Copy include directory
     shutil.rmtree(options.dist_path, ignore_errors=True)
+    logger.info("Copying OpenSSL include directory to {}".format(options.dist_path))
+    shutil.copytree(
+        "{}/include".format(src_path),
+        "{}/include".format(options.dist_path),
+    )
+
+    # Build for each arch
     with src_path:
         for arch in archs:
             logger.info("Building OpenSSL for {}".format(arch))
@@ -77,7 +84,7 @@ def main(options, args):
                 env = os.environ.copy()
                 env["ANDROID_NDK_HOME"] = android_ndk_home
                 env["ANDROID_API"] = options.android_api
-                env["PATH"] = "{}:{}".format(env["PATH"], toolchain_path)
+                env["PATH"] = "{}:{}".format(toolchain_bin_path, env["PATH"])
                 env["CC"] = "clang"
                 subprocess.check_output(
                     "./Configure android-{}".format(arch),
@@ -91,8 +98,10 @@ def main(options, args):
                     env=env,
                     stderr=subprocess.STDOUT,
                 )
-            except subprocess.CalledProcessError:
-                raise Exception("Failed to configure OpenSSL")
+            except subprocess.CalledProcessError as e:
+                raise Exception(
+                    "Failed to configure OpenSSL for {}: {}".format(arch, e.output)
+                )
 
             logger.info("Copying OpenSSL libraries to {}".format(options.dist_path))
             dist_path = Path("{}/{}".format(options.dist_path, arch))
