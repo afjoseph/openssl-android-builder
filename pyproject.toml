@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "openssl-android-builder"
+version = "0.1.0"
+description = ""
+authors = ["afjoseph"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+requests = "^2.31.0"
+path = "^16.9.0"
+loguru = "^0.7.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
