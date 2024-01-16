@@ -7,6 +7,19 @@ import subprocess
 import shutil
 import atexit
 
+# OpenSSL configure options (see INSTALL.md in the root of the OpenSSL source
+# for more info). Feel free to modify as needed:
+# * no-filenames: don't include filenames in the libraries
+# * no-ui: don't include UI code
+# * no-ui-console: don't include UI code (backwards-compatible)
+#   https://github.com/openssl/openssl/issues/11551
+# * no-engine: don't include engine code
+# * no-stdio: don't include stdio code (since Android doesn't have stdio.h)
+# * -fPIC: build position-independent code
+#   You can pass compile flags to the configure script by setting the
+#   -f flag
+OPENSSL_CONFIGURE_OPTIONS = "-fPIC no-ui no-ui-console no-engine no-filenames no-stdio"
+
 
 def main(options, args):
     # Validation
@@ -68,13 +81,8 @@ def main(options, args):
         raise Exception("Failed to untar OpenSSL to correct path")
     atexit.register(lambda: shutil.rmtree(src_path, ignore_errors=True))
 
-    # Copy include directory
+    # Nuke dist path to start fresh
     shutil.rmtree(options.dist_path, ignore_errors=True)
-    logger.info("Copying OpenSSL include directory to {}".format(options.dist_path))
-    shutil.copytree(
-        "{}/include".format(src_path),
-        "{}/include".format(options.dist_path),
-    )
 
     # Build for each arch
     with src_path:
@@ -87,7 +95,7 @@ def main(options, args):
                 env["PATH"] = "{}:{}".format(toolchain_bin_path, env["PATH"])
                 env["CC"] = "clang"
                 subprocess.check_output(
-                    "./Configure android-{}".format(arch),
+                    "./Configure android-{} {}".format(arch, OPENSSL_CONFIGURE_OPTIONS),
                     shell=True,
                     env=env,
                     stderr=subprocess.STDOUT,
@@ -103,9 +111,9 @@ def main(options, args):
                     "Failed to configure OpenSSL for {}: {}".format(arch, e.output)
                 )
 
-            logger.info("Copying OpenSSL libraries to {}".format(options.dist_path))
-            dist_path = Path("{}/{}".format(options.dist_path, arch))
-            os.makedirs(dist_path)
+            logger.info("Building for {} done. Copying libs...".format(arch))
+            arch_dist_path = Path("{}/{}".format(options.dist_path, arch))
+            os.makedirs(arch_dist_path)
             for lib in [
                 "libssl.a",
                 "libcrypto.a",
@@ -113,41 +121,56 @@ def main(options, args):
                 "libcrypto.so",
             ]:
                 src_lib_path = Path(lib)
+                dst_lib_path = Path("{}/{}".format(arch_dist_path, lib))
                 if not src_lib_path.exists():
                     raise Exception("Failed to find {} library".format(lib))
+                logger.info("Copying {} to {}".format(src_lib_path, dst_lib_path))
                 shutil.copyfile(
                     src_lib_path,
-                    Path("{}/{}".format(dist_path, lib)),
+                    dst_lib_path,
                 )
 
+    # Copy include directory
+    # This should be done **after** the ./configure script is run at least once
+    # (doesn't matter the architecture) since the file
+    # "include/openssl/opensslconf.h" defines some macros that reflect the
+    # chosen configure options.
+    logger.info("Copying OpenSSL include directory to {}".format(options.dist_path))
+    shutil.copytree(
+        "{}/include".format(src_path),
+        "{}/include".format(options.dist_path),
+    )
     logger.info("Done")
 
 
 if __name__ == "__main__":
-    parser = OptionParser()
-    parser.add_option(
-        "--openssl_version",
-        dest="openssl_version",
-        default="1.1.1t",
-        help="OpenSSL version to build. Defaults to '1.1.1t'",
-    )
-    parser.add_option(
-        "--android_api",
-        dest="android_api",
-        default="21",
-        help="Android API level to build for. Defaults to '21'",
-    )
-    parser.add_option(
-        "--android-archs",
-        dest="android_archs",
-        default="arm64",
-        help="comma-separated list of android architectures to build for. Defaults to 'arm64'. Valid values are 'arm', 'arm64', 'x86', 'x86_64'",
-    )
-    parser.add_option(
-        "--dist-path",
-        dest="dist_path",
-        default="dist",
-        help="Path to store the built OpenSSL libraries. Defaults to 'dist'",
-    )
-    (options, args) = parser.parse_args()
-    main(options, args)
+    try:
+        parser = OptionParser()
+        parser.add_option(
+            "--openssl_version",
+            dest="openssl_version",
+            default="1.1.1t",
+            help="OpenSSL version to build. Defaults to '1.1.1t'",
+        )
+        parser.add_option(
+            "--android_api",
+            dest="android_api",
+            default="21",
+            help="Android API level to build for. Defaults to '21'",
+        )
+        parser.add_option(
+            "--android-archs",
+            dest="android_archs",
+            default="arm64",
+            help="comma-separated list of android architectures to build for. Defaults to 'arm64'. Valid values are 'arm', 'arm64', 'x86', 'x86_64'",
+        )
+        parser.add_option(
+            "--dist-path",
+            dest="dist_path",
+            default="dist",
+            help="Path to store the built OpenSSL libraries. Defaults to 'dist'",
+        )
+        (options, args) = parser.parse_args()
+        main(options, args)
+    except KeyboardInterrupt:
+        logger.info("Exiting...")
